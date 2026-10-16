@@ -1,0 +1,31 @@
+# Secrets / local env (Railway Variables are the source of truth)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Telegram sessions — never commit these
+*.session
+*.session-journal
+
+# Runtime output
+logs/
+*.log
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# OpenWork workspace internals
+.opencode/

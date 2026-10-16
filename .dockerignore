@@ -1,0 +1,39 @@
+# Build-context exclusions — keeps Railway image builds fast and safe.
+
+.git
+.gitignore
+.github
+
+# Secrets are provided by Railway Variables at runtime, never baked into the image
+.env
+.env.*
+!.env.example
+
+# Python build artefacts
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local virtualenvs
+.venv/
+venv/
+env/
+
+# Telegram session files must never be committed or copied into the image
+*.session
+*.session-journal
+
+# Runtime output
+logs/
+*.log
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Node / misc (if present)
+node_modules/
+.railway/
