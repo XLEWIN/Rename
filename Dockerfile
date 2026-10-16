@@ -55,7 +55,7 @@ FROM python:3.12-slim-bookworm
 # PYTHONPATH: Ensures the loader find plugins relative to the root
 # PORT: Fallback listen port for local docker runs.  Railway/Render inject
 #       their own PORT at runtime, which overrides this image default, and
-#       config.py reads WEBHOOK_PORT -> PORT -> 8023 in that order.
+#       config.py reads PORT -> WEBHOOK_PORT -> 8023 in that order.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/venv/bin:$PATH" \

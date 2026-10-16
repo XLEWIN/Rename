@@ -370,16 +370,27 @@ class Bot(Client):
         try:
             async def bot_health_probe():
                 return self.is_running
-            
+
             app = await web_server(health_probe=bot_health_probe)
             self.web_runner = web.AppRunner(app)
             await self.web_runner.setup()
-            
+
+            # Log the exact bind decision so port-routing mismatches are
+            # visible in Railway logs at a glance (Railway routes to $PORT).
+            logger.info(
+                f"Web bind env: PORT={os.environ.get('PORT')!r} "
+                f"WEBHOOK_PORT={os.environ.get('WEBHOOK_PORT')!r} "
+                f"-> binding 0.0.0.0:{Config.WEBHOOK_PORT}"
+            )
             self.web_site = web.TCPSite(self.web_runner, "0.0.0.0", Config.WEBHOOK_PORT)
             await self.web_site.start()
             logger.info(f"✅ Webhook server started successfully on port {Config.WEBHOOK_PORT}")
         except Exception as e:
-            logger.error(f"Failed to setup webhook: {e}", exc_info=True)
+            logger.error(
+                f"Failed to setup webhook: {e} — the process cannot stay healthy "
+                f"without the web server (Railway will restart the deploy).",
+                exc_info=True,
+            )
             raise
 
     def _install_exception_handler(self) -> None:
@@ -445,16 +456,25 @@ class Bot(Client):
             await self.send_restart_notification()
             await self.setup_webhook()
 
-            rename_fn = self.job_handlers.get("file_rename")
-            if not rename_fn:
-                with suppress(ImportError):
-                    from plugins.file_rename import auto_rename_files
-                    rename_fn = auto_rename_files
-            
-            if rename_fn:
-                await job_ledger.startup(client=self, enqueue_fn=rename_fn)
+            # Recovery + background infrastructure must NEVER abort startup.
+            # An exception here used to kill the process, which put Railway
+            # into a deploy → restart → deploy loop. Log and continue instead.
+            try:
+                rename_fn = self.job_handlers.get("file_rename")
+                if not rename_fn:
+                    with suppress(ImportError):
+                        from plugins.file_rename import auto_rename_files
+                        rename_fn = auto_rename_files
 
-            start_background_tasks()
+                if rename_fn:
+                    await job_ledger.startup(client=self, enqueue_fn=rename_fn)
+
+                start_background_tasks()
+            except Exception as _e:
+                logger.error(
+                    f"Startup recovery/background init failed (non-fatal, bot keeps running): {_e}",
+                    exc_info=True,
+                )
             _bg_inits = [
                 ("admin",       "plugins.admin",       "init"),
                 ("force_subs",  "plugins.force_subs",  "init"),
@@ -559,20 +579,47 @@ class Bot(Client):
 
 def main():
     loop = asyncio.get_event_loop()
+    bot = None
+    max_attempts = 3
+
+    # Retry startup in-process instead of dying on the first transient error
+    # (Telegram DC flap, Mongo hiccup, brief port conflict). Each attempt
+    # gives the platform a live process to probe; exiting immediately just
+    # puts Railway into a deploy-restart loop.
+    for attempt in range(1, max_attempts + 1):
+        try:
+            bot = Bot()
+            logger.info(
+                f"Bot instance initialized safely "
+                f"(attempt {attempt}/{max_attempts}). Commencing runtime engine..."
+            )
+            loop.run_until_complete(bot.start())
+            break
+        except KeyboardInterrupt:
+            logger.info("Received execution stop signal via console...")
+            return
+        except Exception as e:
+            logger.critical(
+                f"Fatal error in core execution loop (attempt {attempt}/{max_attempts}): {e}",
+                exc_info=True,
+            )
+            if attempt < max_attempts:
+                delay = 15 * attempt
+                logger.info(f"Retrying startup in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.critical(
+                    "Startup failed after all attempts — exiting with non-zero code "
+                    "so the platform's restart policy applies backoff."
+                )
+                sys.exit(1)
 
     try:
-        bot = Bot()
-        logger.info("Bot instance initialized safely. Commencing runtime engine...")
-        
-        loop.run_until_complete(bot.start())
         loop.run_until_complete(bot.shutdown_event.wait())
-        
     except KeyboardInterrupt:
         logger.info("Received execution stop signal via console...")
-    except Exception as e:
-        logger.critical(f"Fatal error in core execution loop: {e}", exc_info=True)
     finally:
-        if 'bot' in locals() and bot.is_running:
+        if bot is not None and bot.is_running:
             with suppress(Exception):
                 loop.run_until_complete(bot.stop())
         logger.info("Bot process completely terminated")

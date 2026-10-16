@@ -146,11 +146,14 @@ class Config(object):
     SESSION_NAME                = "Renamer"
     # The bot doubles as the Railway web service: it binds 0.0.0.0:<port> and
     # serves /health so Railway can health-check and route traffic to it.
-    #   1. WEBHOOK_PORT  - explicit override (optional)
-    #   2. PORT          - injected by Railway/Render/Heroku at runtime
+    #   1. PORT          - injected by Railway/Render/Heroku at runtime.
+    #                      Always wins when set, so the app can never bind a
+    #                      port the platform does not route to (that mismatch
+    #                      causes an endless deploy-restart loop).
+    #   2. WEBHOOK_PORT  - manual override when the platform sets no PORT
     #   3. 8023          - local / docker default (matches EXPOSE in Dockerfile)
     WEBHOOK                     = env_bool("WEBHOOK", True)
-    WEBHOOK_PORT                = env_int("WEBHOOK_PORT", 8023, "PORT")
+    WEBHOOK_PORT                = env_int("PORT", 8023, "WEBHOOK_PORT")
 
     # Advanced Pyrogram Tuning
     WORKERS                    = env_int("WORKERS", 12)
